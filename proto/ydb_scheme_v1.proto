@@ -1,0 +1,100 @@
+syntax = "proto3";
+
+package Ydb.Scheme.V1;
+
+option java_package = "tech.ydb.proto.scheme.v1";
+
+// YDB Scheme Service - for DDL operations
+service SchemeService {
+  // Create a directory or table
+  rpc MakeDirectory(MakeDirectoryRequest) returns (MakeDirectoryResponse);
+  
+  // Remove a directory or table
+  rpc RemoveDirectory(RemoveDirectoryRequest) returns (RemoveDirectoryResponse);
+  
+  // Describe a path (get metadata)
+  rpc DescribePath(DescribePathRequest) returns (DescribePathResponse);
+  
+  // List directory contents
+  rpc ListDirectory(ListDirectoryRequest) returns (ListDirectoryResponse);
+}
+
+message MakeDirectoryRequest {
+  string database = 1;
+  string path = 2;
+}
+
+message MakeDirectoryResponse {
+  Status status = 1;
+}
+
+message RemoveDirectoryRequest {
+  string database = 1;
+  string path = 2;
+}
+
+message RemoveDirectoryResponse {
+  Status status = 1;
+}
+
+message DescribePathRequest {
+  string database = 1;
+  string path = 2;
+}
+
+message DescribePathResponse {
+  Status status = 1;
+  Entry self = 2;
+}
+
+message ListDirectoryRequest {
+  string database = 1;
+  string path = 2;
+}
+
+message ListDirectoryResponse {
+  Status status = 1;
+  Entry self = 2;
+  repeated Entry children = 3;
+}
+
+message Entry {
+  string name = 1;
+  string owner = 2;
+  Type type = 3;
+  repeated Permissions effective_permissions = 4;
+  repeated Permissions permissions = 5;
+  uint64 size_bytes = 6;
+  
+  enum Type {
+    UNSPECIFIED = 0;
+    DIRECTORY = 1;
+    TABLE = 2;
+    PERS_QUEUE_GROUP = 3;
+    DATABASE = 4;
+    RTMR_VOLUME = 5;
+    BLOCK_STORE_VOLUME = 6;
+    COORDINATION_NODE = 7;
+    COLUMN_STORE = 12;
+    COLUMN_TABLE = 13;
+    SEQUENCE = 15;
+    REPLICATION = 16;
+    TOPIC = 17;
+  }
+}
+
+message Permissions {
+  string subject = 1;
+  repeated string permission_names = 2;
+}
+
+message Status {
+  uint32 status = 1;
+  repeated Issue issues = 2;
+}
+
+message Issue {
+  uint32 issue_code = 1;
+  string message = 2;
+  uint32 severity = 4;
+}

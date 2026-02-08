@@ -1,0 +1,300 @@
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:grpc/grpc.dart';
+import 'package:logging/logging.dart';
+
+import '../../auth/auth_provider.dart';
+import '../../auth/credentials.dart';
+import '../../errors/errors.dart';
+import '../../retry/retry.dart';
+import '../i_ydb_transport.dart';
+
+/// gRPC-based transport for YDB.
+///
+/// Uses gRPC protocol to communicate with YDB Query Service and Scheme Service.
+/// Supports TLS/SSL connections and authentication via metadata.
+class GrpcTransport implements IYdbTransport {
+  static final Logger _logger = Logger('GrpcTransport');
+
+  final String endpoint;
+  final Duration timeout;
+  final YdbCredentials credentials;
+  final String database;
+  final RetrySettings retrySettings;
+  final bool useTls;
+
+  late ClientChannel _channel;
+  bool _initialized = false;
+
+  /// Creates a GrpcTransport.
+  ///
+  /// [endpoint] - Server endpoint (e.g., 'ydb.serverless.yandexcloud.net:2135')
+  /// [timeout] - Request timeout duration
+  /// [credentials] - YDB credentials for authentication
+  /// [database] - Database path (e.g., '/ru-central1/b1g.../etni...')
+  /// [retrySettings] - Retry configuration
+  /// [useTls] - Whether to use TLS/SSL (default: true for production)
+  GrpcTransport({
+    required this.endpoint,
+    required this.timeout,
+    required this.credentials,
+    required this.database,
+    required this.retrySettings,
+    this.useTls = true,
+  });
+
+  @override
+  Future<void> initialize() async {
+    if (_initialized) return;
+
+    _logger.info('Initializing gRPC transport to $endpoint (TLS: $useTls)');
+
+    // Parse endpoint into host and port
+    final Uri uri = _parseEndpoint(endpoint);
+    final String host = uri.host;
+    final int port = uri.hasPort ? uri.port : (useTls ? 2135 : 2136);
+
+    // Create gRPC channel
+    _channel = ClientChannel(
+      host,
+      port: port,
+      options: ChannelOptions(
+        credentials: useTls
+            ? const ChannelCredentials.secure()
+            : const ChannelCredentials.insecure(),
+        connectionTimeout: timeout,
+      ),
+    );
+
+    _initialized = true;
+    _logger.info('gRPC channel initialized: $host:$port');
+  }
+
+  @override
+  Future<void> close() async {
+    if (!_initialized) return;
+    
+    _logger.info('Closing gRPC channel');
+    await _channel.shutdown();
+    _initialized = false;
+  }
+
+  @override
+  Future<T> send<T>({
+    required String endpoint,
+    required Object? body,
+    required T Function(Object? json) decoder,
+    Map<String, String>? headers,
+  }) async {
+    if (!_initialized) {
+      throw StateError('GrpcTransport is not initialized');
+    }
+
+    Future<T> operation() async {
+      final String token = await credentials.getAuthToken() ?? '';
+      
+      _logger.info('Token length: ${token.length}, starts with: ${token.substring(0, token.length > 20 ? 20 : token.length)}...');
+
+      // Determine service and method from endpoint path
+      // Examples:
+      //   '/database/query/v1/execute' -> service: query.v1.QueryService, method: ExecuteQuery
+      //   '/scheme/v1/create_table' -> service: scheme.v1.SchemeService, method: CreateTable
+      final GrpcEndpoint grpcEndpoint = _parseGrpcEndpoint(endpoint);
+
+      _logger.info(
+          'Making gRPC request to ${grpcEndpoint.service}/${grpcEndpoint.method}');
+      _logger.info('Database: $database');
+
+      // Create gRPC call options with metadata
+      final CallOptions options = CallOptions(
+        timeout: timeout,
+        metadata: <String, String>{
+          'x-ydb-database': database,
+          if (token.isNotEmpty) 'authorization': token, // Token already includes "Bearer " prefix
+          ...?headers,
+        },
+      );
+      
+      _logger.info('Metadata keys: ${options.metadata.keys.join(", ")}');
+
+      try {
+        // Make unary gRPC call
+        // For YDB Query Service, we use a generic unary call with JSON serialization
+        final Map<String, dynamic> responseData = await _makeUnaryCall(
+          grpcEndpoint.service,
+          grpcEndpoint.method,
+          body as Map<String, dynamic>? ?? <String, dynamic>{},
+          options,
+        );
+        _logger.fine('Received response: ${responseData.keys}');
+
+        // Check for YDB-level errors in response
+        if (responseData.containsKey('status') &&
+            responseData['status'] != 0 &&
+            responseData['status'] != 'SUCCESS') {
+          throw YdbStatusException.fromJson(responseData);
+        }
+
+        return decoder(responseData);
+      } on GrpcError catch (e) {
+        _logger.warning('gRPC error: ${e.codeName} - ${e.message}');
+        throw _mapGrpcError(e);
+      }
+    }
+
+    // Use retry logic with proper settings
+    return withRetry(
+      operation,
+      retrySettings,
+      auth: credentials is AuthProvider ? credentials as AuthProvider : null,
+    );
+  }
+
+  /// Parse endpoint string into URI.
+  ///
+  /// Handles both full URLs and host:port format.
+  Uri _parseEndpoint(String endpoint) {
+    // Remove protocol prefix if present
+    String normalized = endpoint;
+    if (normalized.startsWith('grpc://') ||
+        normalized.startsWith('grpcs://')) {
+      normalized = normalized.replaceFirst(RegExp(r'^grpcs?://'), '');
+    } else if (normalized.startsWith('https://')) {
+      normalized = normalized.replaceFirst('https://', '');
+    } else if (normalized.startsWith('http://')) {
+      normalized = normalized.replaceFirst('http://', '');
+    }
+
+    // Parse as URI
+    if (!normalized.contains('://')) {
+      normalized = 'grpc://$normalized';
+    }
+
+    return Uri.parse(normalized);
+  }
+
+  /// Parse YDB endpoint path into gRPC service and method.
+  GrpcEndpoint _parseGrpcEndpoint(String path) {
+    // Examples:
+    //   '/database/query/v1/execute' -> Ydb.Query.V1.QueryService/ExecuteQuery
+    //   '/scheme/v1/create_table' -> Ydb.Table.V1.TableService/CreateTable
+
+    // Map of endpoint paths to gRPC service/method
+    final Map<String, GrpcEndpoint> endpointMap = <String, GrpcEndpoint>{
+      // Query Service V1 -> Use Table Service instead
+      'query/v1/execute': GrpcEndpoint(
+        service: 'Ydb.Table.V1.TableService',
+        method: 'ExecuteDataQuery',
+      ),
+      'query/v1/begin_transaction': GrpcEndpoint(
+        service: 'Ydb.Table.V1.TableService',
+        method: 'BeginTransaction',
+      ),
+      'query/v1/commit_transaction': GrpcEndpoint(
+        service: 'Ydb.Table.V1.TableService',
+        method: 'CommitTransaction',
+      ),
+      'query/v1/rollback_transaction': GrpcEndpoint(
+        service: 'Ydb.Table.V1.TableService',
+        method: 'RollbackTransaction',
+      ),
+      
+      // Table Service V1 (for DDL operations)
+      'scheme/v1/create_table': GrpcEndpoint(
+        service: 'Ydb.Table.V1.TableService',
+        method: 'CreateTable',
+      ),
+      'scheme/v1/alter_table': GrpcEndpoint(
+        service: 'Ydb.Table.V1.TableService',
+        method: 'AlterTable',
+      ),
+      'scheme/v1/drop_table': GrpcEndpoint(
+        service: 'Ydb.Table.V1.TableService',
+        method: 'DropTable',
+      ),
+      'scheme/v1/describe_table': GrpcEndpoint(
+        service: 'Ydb.Table.V1.TableService',
+        method: 'DescribeTable',
+      ),
+    };
+
+    // Normalize path by removing leading database part
+    String normalizedPath = path;
+    if (normalizedPath.contains('/query/v1/')) {
+      normalizedPath = normalizedPath.substring(
+          normalizedPath.indexOf('/query/v1/') + 1);
+    } else if (normalizedPath.contains('/scheme/v1/')) {
+      normalizedPath = normalizedPath.substring(
+          normalizedPath.indexOf('/scheme/v1/') + 1);
+    }
+
+    final GrpcEndpoint? endpoint = endpointMap[normalizedPath];
+    if (endpoint != null) {
+      return endpoint;
+    }
+
+    throw ArgumentError('Unknown endpoint format: $path');
+  }
+
+  /// Make a unary gRPC call using generic JSON encoding.
+  ///
+  /// This is a simplified implementation that uses JSON over gRPC
+  /// instead of protobuf. It's sufficient for YDB's JSON-based API.
+  Future<Map<String, dynamic>> _makeUnaryCall(
+    String service,
+    String method,
+    Map<String, dynamic> request,
+    CallOptions options,
+  ) async {
+    // Create a client method for unary calls
+    final ClientMethod<Map<String, dynamic>, Map<String, dynamic>> clientMethod =
+        ClientMethod<Map<String, dynamic>, Map<String, dynamic>>(
+      '/$service/$method',
+      (Object? value) => utf8.encode(jsonEncode(value)),
+      (List<int> value) =>
+          jsonDecode(utf8.decode(value)) as Map<String, dynamic>,
+    );
+
+    // Create a stub for making calls
+    final Client stub = Client(_channel);
+    
+    // Make the unary call - pass request directly, not as Stream
+    final ResponseFuture<Map<String, dynamic>> responseFuture =
+        stub.$createUnaryCall(
+      clientMethod,
+      request,
+      options: options,
+    );
+    
+    return await responseFuture;
+  }
+
+  /// Map gRPC errors to YDB exceptions.
+  YdbException _mapGrpcError(GrpcError error) {
+    switch (error.code) {
+      case StatusCode.unavailable:
+      case StatusCode.deadlineExceeded:
+        return YdbNetworkException(
+          'gRPC ${error.codeName}: ${error.message}',
+        );
+      case StatusCode.unauthenticated:
+      case StatusCode.permissionDenied:
+        return YdbNetworkException(
+          'Authentication failed: ${error.message}',
+        );
+      default:
+        return YdbNetworkException(
+          'gRPC error (${error.codeName}): ${error.message}',
+        );
+    }
+  }
+}
+
+/// Parsed gRPC endpoint information.
+class GrpcEndpoint {
+  final String service;
+  final String method;
+
+  GrpcEndpoint({required this.service, required this.method});
+}

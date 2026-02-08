@@ -1,0 +1,209 @@
+syntax = "proto3";
+
+package Ydb.Query.V1;
+
+option java_package = "tech.ydb.proto.query.v1";
+
+// YDB Query Service V1 - simplified service for executing queries
+service QueryService {
+  // Execute a single YQL query
+  rpc ExecuteQuery(ExecuteQueryRequest) returns (ExecuteQueryResponse);
+}
+
+message ExecuteQueryRequest {
+  // Database path
+  string database = 1;
+  
+  // YQL query text
+  string yql_text = 2;
+  
+  // Query parameters (optional)
+  map<string, TypedValue> parameters = 3;
+  
+  // Transaction control (optional)
+  TransactionControl tx_control = 4;
+}
+
+message ExecuteQueryResponse {
+  // Operation status
+  Status status = 1;
+  
+  // Result sets
+  repeated ResultSet result_sets = 2;
+  
+  // Transaction metadata
+  TransactionMeta tx_meta = 3;
+}
+
+message TransactionControl {
+  oneof tx_selector {
+    // Begin a new transaction with specified mode
+    TransactionSettings begin_tx = 1;
+    // Use an existing transaction
+    string tx_id = 2;
+  }
+  
+  // Commit transaction after execution
+  bool commit_tx = 10;
+}
+
+message TransactionSettings {
+  oneof tx_mode {
+    SerializableReadWrite serializable_read_write = 1;
+    OnlineReadOnly online_read_only = 2;
+    StaleReadOnly stale_read_only = 3;
+    SnapshotReadOnly snapshot_read_only = 4;
+  }
+  
+  message SerializableReadWrite {}
+  message OnlineReadOnly { bool allow_inconsistent_reads = 1; }
+  message StaleReadOnly {}
+  message SnapshotReadOnly {}
+}
+
+message TransactionMeta {
+  // Transaction ID
+  string id = 1;
+}
+
+message Status {
+  // Status code (0 = SUCCESS)
+  uint32 status = 1;
+  
+  // List of issues/errors
+  repeated Issue issues = 2;
+}
+
+message Issue {
+  // Issue code
+  uint32 issue_code = 1;
+  
+  // Human-readable message
+  string message = 2;
+  
+  // Severity (INFO, WARNING, ERROR, FATAL)
+  uint32 severity = 4;
+}
+
+message ResultSet {
+  // Column descriptions
+  repeated Column columns = 1;
+  
+  // Row data
+  repeated Row rows = 2;
+  
+  // Truncated flag
+  bool truncated = 3;
+}
+
+message Column {
+  // Column name
+  string name = 1;
+  
+  // Column type
+  Type type = 2;
+}
+
+message Row {
+  // Values corresponding to columns
+  repeated Value items = 1;
+}
+
+message Type {
+  oneof type {
+    PrimitiveTypeId type_id = 1;
+    OptionalType optional_type = 2;
+    ListType list_type = 3;
+    TupleType tuple_type = 4;
+    StructType struct_type = 5;
+    DictType dict_type = 6;
+    DecimalType decimal_type = 7;
+  }
+}
+
+enum PrimitiveTypeId {
+  BOOL = 0;
+  INT8 = 1;
+  UINT8 = 2;
+  INT16 = 3;
+  UINT16 = 4;
+  INT32 = 5;
+  UINT32 = 6;
+  INT64 = 7;
+  UINT64 = 8;
+  FLOAT = 9;
+  DOUBLE = 10;
+  STRING = 11;
+  UTF8 = 12;
+  YSON = 13;
+  JSON = 14;
+  UUID = 15;
+  DATE = 16;
+  DATETIME = 17;
+  TIMESTAMP = 18;
+  INTERVAL = 19;
+  DECIMAL = 20;
+  JSON_DOCUMENT = 21;
+  DYNUMBER = 22;
+}
+
+message OptionalType {
+  Type item = 1;
+}
+
+message ListType {
+  Type item = 1;
+}
+
+message TupleType {
+  repeated Type elements = 1;
+}
+
+message StructType {
+  repeated StructMember members = 1;
+  
+  message StructMember {
+    string name = 1;
+    Type type = 2;
+  }
+}
+
+message DictType {
+  Type key = 1;
+  Type payload = 2;
+}
+
+message DecimalType {
+  uint32 precision = 1;
+  uint32 scale = 2;
+}
+
+message Value {
+  oneof value {
+    bool bool_value = 1;
+    sint32 int32_value = 2;
+    uint32 uint32_value = 3;
+    sint64 int64_value = 4;
+    uint64 uint64_value = 5;
+    float float_value = 6;
+    double double_value = 7;
+    bytes bytes_value = 8;
+    string text_value = 9;
+    NullValue null_flag_value = 10;
+    NestedValue nested_value = 11;
+  }
+  
+  // High 128 bits for Decimal/Uint128/Int128
+  uint64 high_128 = 15;
+}
+
+message NullValue {}
+
+message NestedValue {
+  repeated Value items = 1;
+}
+
+message TypedValue {
+  Type type = 1;
+  Value value = 2;
+}
