@@ -10,6 +10,9 @@ environment:
   sdk: ^3.0.0
   flutter: ">=3.0.0"
 
+false_secrets:
+  - /test/auth/rsa_jwt_signer_test.dart
+
 dependencies:
   dart_jsonwebtoken: ^3.3.1
   fixnum: ^1.1.1
