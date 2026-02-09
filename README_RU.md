@@ -3,13 +3,13 @@
 [![en](https://img.shields.io/badge/lang-en-blue.svg)](README.md)
 [![ru](https://img.shields.io/badge/lang-ru-red.svg)](README_RU.md)
 
-**Готовый к production YDB SDK для Dart и Flutter** с типобезопасным доступом к распределённой SQL базе данных [YDB](https://ydb.tech/).
+**YDB SDK для Dart и Flutter** - типобезопасный клиент для работы с распределённой SQL базой данных [YDB](https://ydb.tech/).
 
 ## Обзор
 
 ### Что это?
 
-YDB Flutter SDK - это community-driven, production-ready клиентская библиотека для [Yandex Database (YDB)](https://ydb.tech/) - больше, чем Distributed SQL база данных. Мы завезли поддержку YDB в экосистему Dart и Flutter, позволяя разработчикам создавать мобильные, веб и десктопные приложения с YDB в качестве backend.
+YDB Flutter SDK - библиотека для [Yandex Database (YDB)](https://ydb.tech/) - больше, чем Distributed SQL база данных. Мы завезли поддержку YDB в экосистему Dart и Flutter, позволяя разработчикам создавать мобильные, веб и десктопные приложения с YDB в качестве backend.
 
 ### Зачем нужен YDB Flutter SDK?
 
@@ -20,14 +20,13 @@ YDB Flutter SDK - это community-driven, production-ready клиентская
 - Аутентификация в Яндекс.Облаке (IAM, Service Account) требует специальной обработки
 - Нет готового решения для Flutter разработчиков, желающих использовать YDB
 
-**Что мы решаем:**
+**Решение:**
 
-- **Нет официального SDK**: Яндекс не предоставляет Dart/Flutter SDK - мы заполняем этот пробел
-- **Сложное отображение типов**: YDB имеет 20+ специфичных типов (Int64, Uint64, Decimal, Timestamp и др.), которые не отображаются напрямую в Dart - мы обрабатываем все конвертации автоматически
-- **Сложность gRPC**: YDB использует gRPC с protobuf - мы предоставляем чистый, идиоматичный Dart API
-- **Боль с аутентификацией**: Яндекс.Облако IAM требует обмена OAuth токенов и подписи JWT для Service Account - встроено и протестировано
-- **Управление сессиями**: YDB требует пулинга сессий и управления их жизненным циклом - мы это обрабатываем
-- **Типобезопасность**: Мы предоставляем проверку типов на этапе компиляции для операций с YDB
+- **Типобезопасность**: автоматическое отображение всех YDB-типов (Int64, Uint64, Decimal, Timestamp и др.)
+- **gRPC под капотом**: без необходимости работать с protobuf напрямую
+- **Встроенная аутентификация**:IAM, OAuth, Service Account (JWT)
+- **Управление сессиями**: пул, lifecycle, ретраи
+- **Production-quality**: тесты, реальные интеграции с Yandex Cloud
 
 ### Ключевые преимущества
 
@@ -40,26 +39,11 @@ YDB Flutter SDK - это community-driven, production-ready клиентская
 
 ## Мотивация
 
-Этот проект родился из ~потребности~ необходимости использовать YDB в Flutter приложениях. Хотя YDB имеет отличные Python и Go SDK, экосистема Dart/Flutter оставалась без официальной поддержки.
+Этот проект родился из ~потребности~ необходимости использовать YDB в Flutter приложениях.
 
-**Почему это важно:**
+**Цель проекта** - реализовать для Flutter-разработчиков полноценный, надёжный и удобный доступ к YDB
 
-1. **Рост Flutter**: Яндекс не все решения переводит на Dart/Flutter
-2. **Яндекс.Облако YDB**: Production-grade распределённая база данных с строгой консистентностью, ACID транзакциями и горизонтальным масштабированием
-3. **Пробел**: Не было способа соединить эти две мощные технологии
-
-**Философия дизайна:**
-
-- **Follow SDK**: Мы точно следуем архитектуре официальных [ydb-python-sdk](https://github.com/ydb-platform/ydb-python-sdk) и [ydb-go-sdk](https://github.com/ydb-platform/ydb-go-sdk)
-- **Идиоматичный Dart**: async/await, Streams, null-safety, правильная обработка ошибок
-- **Production First**: Создан для реального использования с первого дня - не proof-of-concept
-- **Стандарты сообщества**: Полные тесты, документация, семантическое версионирование
-
-**Текущий статус:**
-
-- gRPC транспорт готов к production с полной системой типов
-- Реальная интеграция с Яндекс.Облаком протестирована и работает
-- Используется в production ранними последователями
+**Статус**: активно развивается, gRPC-транспорт и типовая система готовы, интеграция с Yandex Cloud протестирована и используется в production
 
 ## Возможности
 
@@ -105,30 +89,13 @@ YDB Flutter SDK - это community-driven, production-ready клиентская
 - Параметризованные запросы с типобезопасными параметрами
 - Пример Flutter приложения с реальными CRUD операциями
 
-### Планируемые функции
-
-- Продвинутый пулинг сессий с автоматическим управлением жизненным циклом
-- Балансировка нагрузки и failover для подключений
-- Transaction API со всеми уровнями изоляции (SerializableRW, OnlineRO, StaleRO)
-- Production-ready библиотека Flutter виджетов
-- Политики повторов с настраиваемыми стратегиями
-- Table Service (legacy stateful API)
-- Массовые операции и batch вставки
-- Streaming для больших результирующих наборов
-- Discovery Service для обновления endpoint'ов
-- Topic API (pub/sub)
-- Coordination Service (распределённые блокировки)
-
 ## Установка
 
 Добавьте в ваш `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  ydb_flutter_sdk:
-    git:
-      url: https://github.com/icas711/ydb_flutter_sdk.git
-      ref: v0.2.0
+  ydb_flutter_sdk: ^0.2.0
 ```
 
 ## Быстрый старт
@@ -232,35 +199,10 @@ YdbDriver
 
 ## Документация
 
-### Для пользователей
-
 - **Руководство по быстрому старту** - Начните работу за 5 минут
 - **[Аутентификация](docs/AUTH.md)** - Все методы аутентификации
 - **Система типов** - Работа с типами YDB
 - **[Примеры](example/)** - Полные рабочие примеры
-
-### Для разработчиков
-
-- **[MVP План](docs/MVP_PLAN.md)** - 10-недельная дорожная карта реализации
-- **[gRPC Статус](docs/GRPC_STATUS.md)** - Детальный статус реализации gRPC
-- **[Анализ SDK](docs/SDK_ANALYSIS.md)** - Архитектурные решения
-- **Руководство по участию** - Как внести вклад
-
-## Статус разработки
-
-| Компонент      | Статус        | Тесты | Примечания                    |
-| -------------- | ------------- | ----- | ----------------------------- |
-| Система типов  | Завершена     | 143   | Все типы YDB поддерживаются   |
-| gRPC транспорт | Завершён      | 97    | Production ready v0.2.0       |
-| HTTP транспорт | Завершён      | 143   | Legacy, работает              |
-| Аутентификация | Завершена     | 50    | Все провайдеры протестированы |
-| Driver         | Запланирован  | -     | Управление подключениями      |
-| Session Pool   | Запланирован  | -     | Жизненный цикл сессий         |
-| Query Service  | Запланирован  | -     | Современный stateless API     |
-| Table Service  | Запланирован  | -     | Legacy stateful API           |
-| Транзакции     | Запланированы | -     | Все уровни изоляции           |
-
-**Всего: 430+ тестов, 100% прохождение**
 
 ## Тестирование
 
@@ -283,26 +225,6 @@ flutter test test/grpc/
 flutter test test/auth/
 ```
 
-## Сравнение с Python SDK
-
-Этот SDK следует дизайну [ydb-python-sdk](https://github.com/ydb-platform/ydb-python-sdk), адаптированному для Dart:
-
-| Python                               | Dart                                        |
-| ------------------------------------ | ------------------------------------------- |
-| `ydb.Driver`                         | `YdbDriver`                                 |
-| `ydb.QuerySessionPool`               | `QuerySessionPool`                          |
-| `ydb.SerializableReadWrite`          | `TxMode.serializableReadWrite()`            |
-| `@retry_operation_sync`              | `withRetry(...)`                            |
-| `session.execute(query, parameters)` | `session.execute(query, parameters: {...})` |
-
-## Участие в разработке
-
-Мы приветствуем вклад в развитие проекта! Пожалуйста:
-
-1. Прочитайте [Анализ SDK](docs/SDK_ANALYSIS.md) и [MVP План](docs/MVP_PLAN.md)
-2. Проверьте открытые issues
-3. Отправьте PR с тестами и документацией
-
 ## Лицензия
 
 [Apache 2.0](LICENSE) - такая же как у YDB
@@ -310,8 +232,6 @@ flutter test test/auth/
 ## Ссылки
 
 - [Документация YDB](https://ydb.tech/ru/docs/)
-- [YDB Python SDK](https://github.com/ydb-platform/ydb-python-sdk)
-- [YDB Go SDK](https://github.com/ydb-platform/ydb-go-sdk)
 - [Yandex Cloud YDB](https://cloud.yandex.ru/services/ydb)
 
 ---

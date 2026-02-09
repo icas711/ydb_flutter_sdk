@@ -1,15 +1,6 @@
-## Unreleased
+## 0.2.1 (2026-02-09)
 
-### Fixes
-
-- **Authentication**:
-  - Fixed JWT signature validation for Service Account authentication with Yandex Cloud IAM
-  - Updated dart_jsonwebtoken to v3.3.1 for proper custom header support
-  - RsaJwtSigner now correctly includes `kid` (Key ID) in JWT header before signing
-
-### Infrastructure
-
-- **Dependencies**: Upgraded dart_jsonwebtoken from 2.13.0 to 3.3.1
+- update readme.md
 
 ## 0.2.0 (2026-02-08) - gRPC Production Ready
 

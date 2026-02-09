@@ -1,6 +1,6 @@
 name: ydb_flutter_sdk
-description: "Production-ready Yandex Database SDK for Dart and Flutter with gRPC transport, complete type system, and authentication support"
-version: 0.2.0
+description: "Yandex Database SDK for Dart and Flutter with gRPC transport, complete type system, and authentication support"
+version: 0.2.1
 homepage: https://github.com/icas711/ydb_flutter_sdk
 repository: https://github.com/icas711/ydb_flutter_sdk
 issue_tracker: https://github.com/icas711/ydb_flutter_sdk/issues
