@@ -1,6 +1,6 @@
 name: ydb_flutter_sdk
 description: "Yandex Database SDK for Dart and Flutter with gRPC transport, complete type system, and authentication support"
-version: 0.2.1
+version: 0.2.2
 homepage: https://github.com/icas711/ydb_flutter_sdk
 repository: https://github.com/icas711/ydb_flutter_sdk
 issue_tracker: https://github.com/icas711/ydb_flutter_sdk/issues
@@ -9,6 +9,8 @@ documentation: https://github.com/icas711/ydb_flutter_sdk/blob/main/README.md
 environment:
   sdk: ^3.0.0
   flutter: ">=3.0.0"
+
+license: Apache-2.0
 
 false_secrets:
   - /test/auth/rsa_jwt_signer_test.dart
