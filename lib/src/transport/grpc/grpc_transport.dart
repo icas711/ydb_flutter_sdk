@@ -29,6 +29,7 @@ class GrpcTransport implements IYdbTransport {
 
   late ClientChannel _channel;
   late ydb.TableServiceClient _tableClient;
+  late ydb.SchemeServiceClient _schemeClient;
   bool _initialized = false;
 
   /// Creates a GrpcTransport.
@@ -73,6 +74,7 @@ class GrpcTransport implements IYdbTransport {
 
     // Create service clients
     _tableClient = ydb.TableServiceClient(_channel);
+    _schemeClient = ydb.SchemeServiceClient(_channel);
 
     _initialized = true;
     _logger.info('gRPC channel initialized: $host:$port');
@@ -112,10 +114,38 @@ class GrpcTransport implements IYdbTransport {
       );
 
       try {
-        // For now, we use ExecuteDataQuery from Table Service
-        // This requires a session, which is a simplified approach
         if (endpoint.contains('query/v1/execute')) {
           return await _executeQuery(
+            body as Map<String, dynamic>,
+            options,
+            decoder,
+          );
+        } else if (endpoint.contains('scheme/v1/create_table')) {
+          return await _createTable(
+            body as Map<String, dynamic>,
+            options,
+            decoder,
+          );
+        } else if (endpoint.contains('scheme/v1/drop_table')) {
+          return await _dropTable(
+            body as Map<String, dynamic>,
+            options,
+            decoder,
+          );
+        } else if (endpoint.contains('scheme/v1/alter_table')) {
+          return await _alterTable(
+            body as Map<String, dynamic>,
+            options,
+            decoder,
+          );
+        } else if (endpoint.contains('scheme/v1/describe_table')) {
+          return await _describeTable(
+            body as Map<String, dynamic>,
+            options,
+            decoder,
+          );
+        } else if (endpoint.contains('scheme/v1/list_directory')) {
+          return await _listDirectory(
             body as Map<String, dynamic>,
             options,
             decoder,
@@ -143,23 +173,7 @@ class GrpcTransport implements IYdbTransport {
     CallOptions options,
     T Function(Object? json) decoder,
   ) async {
-    // Create session first
-    final ydb.CreateSessionRequest createSessionRequest =
-        ydb.CreateSessionRequest();
-
-    final ydb.CreateSessionResponse sessionResponseWrapper = await _tableClient
-        .createSession(createSessionRequest, options: options);
-
-    // Unpack CreateSessionResult from Operation
-    final ydb.CreateSessionResult sessionResult = OperationUnpacker.unpack(
-      sessionResponseWrapper.operation,
-      ydb.CreateSessionResult.new,
-    );
-
-    final String sessionId = sessionResult.sessionId;
-    _logger.info('Created session: $sessionId');
-
-    try {
+    return _withSession(options, (String sessionId) async {
       // Execute query
       final ydb.ExecuteDataQueryRequest queryRequest =
           ydb.ExecuteDataQueryRequest()
@@ -191,8 +205,34 @@ class GrpcTransport implements IYdbTransport {
           _convertQueryResultToJson(queryResult);
 
       return decoder(jsonResponse);
+    });
+  }
+
+  /// Executes a callback within a Table Service session.
+  ///
+  /// Creates a session, runs [callback], and always deletes the session after.
+  Future<T> _withSession<T>(
+    CallOptions options,
+    Future<T> Function(String sessionId) callback,
+  ) async {
+    // Create session
+    final ydb.CreateSessionRequest createSessionRequest =
+        ydb.CreateSessionRequest();
+
+    final ydb.CreateSessionResponse sessionResponseWrapper = await _tableClient
+        .createSession(createSessionRequest, options: options);
+
+    final ydb.CreateSessionResult sessionResult = OperationUnpacker.unpack(
+      sessionResponseWrapper.operation,
+      ydb.CreateSessionResult.new,
+    );
+
+    final String sessionId = sessionResult.sessionId;
+    _logger.info('Created session: $sessionId');
+
+    try {
+      return await callback(sessionId);
     } finally {
-      // Delete session
       try {
         final ydb.DeleteSessionRequest deleteRequest =
             ydb.DeleteSessionRequest()..sessionId = sessionId;
@@ -202,6 +242,324 @@ class GrpcTransport implements IYdbTransport {
         _logger.warning('Failed to delete session: $e');
       }
     }
+  }
+
+  /// Create a table using Table Service.
+  Future<T> _createTable<T>(
+    Map<String, dynamic> body,
+    CallOptions options,
+    T Function(Object? json) decoder,
+  ) async {
+    return _withSession(options, (String sessionId) async {
+      final ydb.CreateTableRequest request = ydb.CreateTableRequest()
+        ..sessionId = sessionId
+        ..path = body['path'] as String;
+
+      // Convert columns
+      if (body.containsKey('columns')) {
+        final List<dynamic> columns = body['columns'] as List<dynamic>;
+        for (final dynamic col in columns) {
+          final Map<String, dynamic> colMap = col as Map<String, dynamic>;
+          request.columns.add(_buildColumnMeta(colMap));
+        }
+      }
+
+      // Add primary key
+      if (body.containsKey('primary_key')) {
+        final List<dynamic> pk = body['primary_key'] as List<dynamic>;
+        request.primaryKey.addAll(pk.cast<String>());
+      }
+
+      // Add indexes
+      if (body.containsKey('indexes')) {
+        final List<dynamic> indexes = body['indexes'] as List<dynamic>;
+        for (final dynamic idx in indexes) {
+          final Map<String, dynamic> idxMap = idx as Map<String, dynamic>;
+          request.indexes.add(_buildTableIndex(idxMap));
+        }
+      }
+
+      final ydb.CreateTableResponse response =
+          await _tableClient.createTable(request, options: options);
+
+      // Check operation status (no result payload expected)
+      OperationUnpacker.unpack(
+        response.operation,
+        ydb.CreateTableResponse.new,
+      );
+
+      _logger.info('Created table: ${body['path']}');
+      return decoder(null);
+    });
+  }
+
+  /// Drop a table using Table Service.
+  Future<T> _dropTable<T>(
+    Map<String, dynamic> body,
+    CallOptions options,
+    T Function(Object? json) decoder,
+  ) async {
+    return _withSession(options, (String sessionId) async {
+      final ydb.DropTableRequest request = ydb.DropTableRequest()
+        ..sessionId = sessionId
+        ..path = body['path'] as String;
+
+      final ydb.DropTableResponse response =
+          await _tableClient.dropTable(request, options: options);
+
+      OperationUnpacker.unpack(
+        response.operation,
+        ydb.DropTableResponse.new,
+      );
+
+      _logger.info('Dropped table: ${body['path']}');
+      return decoder(null);
+    });
+  }
+
+  /// Alter a table using Table Service.
+  Future<T> _alterTable<T>(
+    Map<String, dynamic> body,
+    CallOptions options,
+    T Function(Object? json) decoder,
+  ) async {
+    return _withSession(options, (String sessionId) async {
+      final ydb.AlterTableRequest request = ydb.AlterTableRequest()
+        ..sessionId = sessionId
+        ..path = body['path'] as String;
+
+      // Add columns
+      if (body.containsKey('add_columns')) {
+        final List<dynamic> columns = body['add_columns'] as List<dynamic>;
+        for (final dynamic col in columns) {
+          request.addColumns.add(_buildColumnMeta(col as Map<String, dynamic>));
+        }
+      }
+
+      // Drop columns
+      if (body.containsKey('drop_columns')) {
+        final List<dynamic> columns = body['drop_columns'] as List<dynamic>;
+        request.dropColumns.addAll(columns.cast<String>());
+      }
+
+      // Add indexes
+      if (body.containsKey('add_indexes')) {
+        final List<dynamic> indexes = body['add_indexes'] as List<dynamic>;
+        for (final dynamic idx in indexes) {
+          request.addIndexes.add(_buildTableIndex(idx as Map<String, dynamic>));
+        }
+      }
+
+      // Drop indexes
+      if (body.containsKey('drop_indexes')) {
+        final List<dynamic> indexes = body['drop_indexes'] as List<dynamic>;
+        request.dropIndexes.addAll(indexes.cast<String>());
+      }
+
+      final ydb.AlterTableResponse response =
+          await _tableClient.alterTable(request, options: options);
+
+      OperationUnpacker.unpack(
+        response.operation,
+        ydb.AlterTableResponse.new,
+      );
+
+      _logger.info('Altered table: ${body['path']}');
+      return decoder(null);
+    });
+  }
+
+  /// Describe a table using Table Service.
+  Future<T> _describeTable<T>(
+    Map<String, dynamic> body,
+    CallOptions options,
+    T Function(Object? json) decoder,
+  ) async {
+    return _withSession(options, (String sessionId) async {
+      final ydb.DescribeTableRequest request = ydb.DescribeTableRequest()
+        ..sessionId = sessionId
+        ..path = body['path'] as String;
+
+      final ydb.DescribeTableResponse response =
+          await _tableClient.describeTable(request, options: options);
+
+      final ydb.DescribeTableResult result = OperationUnpacker.unpack(
+        response.operation,
+        ydb.DescribeTableResult.new,
+      );
+
+      // Convert protobuf DescribeTableResult to JSON for SDK
+      final Map<String, dynamic> jsonResult = _convertDescribeResultToJson(
+        result,
+        body['path'] as String,
+      );
+
+      _logger.info('Described table: ${body['path']}');
+      return decoder(jsonResult);
+    });
+  }
+
+  /// List directory entries using Scheme Service.
+  Future<T> _listDirectory<T>(
+    Map<String, dynamic> body,
+    CallOptions options,
+    T Function(Object? json) decoder,
+  ) async {
+    final ydb.ListDirectoryRequest request = ydb.ListDirectoryRequest()
+      ..path = body['path'] as String;
+
+    final ydb.ListDirectoryResponse response =
+        await _schemeClient.listDirectory(request, options: options);
+
+    final ydb.ListDirectoryResult result = OperationUnpacker.unpack(
+      response.operation,
+      ydb.ListDirectoryResult.new,
+    );
+
+    // Convert protobuf Entry list to JSON format for SDK layer
+    final List<Map<String, dynamic>> entries = <Map<String, dynamic>>[];
+    for (final ydb.Entry child in result.children) {
+      entries.add(<String, dynamic>{
+        'name': child.name,
+        'owner': child.owner,
+        'type': child.type.name,
+        'size_bytes': child.sizeBytes.toInt(),
+      });
+    }
+
+    _logger
+        .info('Listed directory: ${body['path']} (${entries.length} entries)');
+    return decoder(entries);
+  }
+
+  /// Convert DescribeTableResult protobuf to JSON format.
+  Map<String, dynamic> _convertDescribeResultToJson(
+    ydb.DescribeTableResult result,
+    String path,
+  ) {
+    // Extract table name from path
+    final String name =
+        result.hasSelf() ? result.self.name : path.split('/').last;
+
+    // Convert columns
+    final List<Map<String, dynamic>> columns = <Map<String, dynamic>>[];
+    for (final ydb.ColumnMeta col in result.columns) {
+      final bool isOptional = col.type.hasOptionalType();
+      final String typeName = isOptional
+          ? _convertTypeToString(col.type.optionalType.item)
+          : _convertTypeToString(col.type);
+      columns.add(<String, dynamic>{
+        'name': col.name,
+        'type': typeName,
+        'nullable': isOptional || !col.notNull,
+      });
+    }
+
+    // Convert indexes
+    final List<Map<String, dynamic>> indexes = <Map<String, dynamic>>[];
+    for (final ydb.TableIndexDescription idx in result.indexes) {
+      String indexType = 'global';
+      if (idx.hasGlobalAsyncIndex()) {
+        indexType = 'global_async';
+      } else if (idx.hasGlobalUniqueIndex()) {
+        indexType = 'global_unique';
+      }
+      indexes.add(<String, dynamic>{
+        'name': idx.name,
+        'columns': idx.indexColumns.toList(),
+        'type': indexType,
+      });
+    }
+
+    return <String, dynamic>{
+      'name': name,
+      'columns': columns,
+      'primary_key': result.primaryKey.toList(),
+      if (indexes.isNotEmpty) 'indexes': indexes,
+    };
+  }
+
+  /// Build a protobuf ColumnMeta from SDK JSON column definition.
+  ydb.ColumnMeta _buildColumnMeta(Map<String, dynamic> colMap) {
+    final String name = colMap['name'] as String;
+    final String typeName = colMap['type'] as String;
+    final bool nullable = colMap['nullable'] as bool? ?? true;
+
+    final ydb.ColumnMeta meta = ydb.ColumnMeta()..name = name;
+
+    final ydb.Type primitiveType = _sdkTypeStringToProto(typeName);
+
+    if (nullable) {
+      // Wrap in OptionalType for nullable columns
+      meta.type = ydb.Type()
+        ..optionalType = (ydb.OptionalType()..item = primitiveType);
+    } else {
+      meta.type = primitiveType;
+      meta.notNull = true;
+    }
+
+    return meta;
+  }
+
+  /// Build a protobuf TableIndex from SDK JSON index definition.
+  ydb.TableIndex _buildTableIndex(Map<String, dynamic> idxMap) {
+    final ydb.TableIndex index = ydb.TableIndex()
+      ..name = idxMap['name'] as String;
+
+    final List<dynamic> columns = idxMap['columns'] as List<dynamic>;
+    index.indexColumns.addAll(columns.cast<String>());
+
+    final String indexType = idxMap['type'] as String? ?? 'global';
+    switch (indexType) {
+      case 'global_async':
+        index.globalAsyncIndex = ydb.GlobalAsyncIndex();
+        break;
+      case 'global_unique':
+        index.globalUniqueIndex = ydb.GlobalUniqueIndex();
+        break;
+      default:
+        index.globalIndex = ydb.GlobalIndex();
+    }
+
+    return index;
+  }
+
+  /// Convert SDK type name string (e.g., 'Int64', 'Utf8') to protobuf Type.
+  ydb.Type _sdkTypeStringToProto(String typeName) {
+    final Map<String, ydb.Type_PrimitiveTypeId> typeMap =
+        <String, ydb.Type_PrimitiveTypeId>{
+      'Bool': ydb.Type_PrimitiveTypeId.BOOL,
+      'Int8': ydb.Type_PrimitiveTypeId.INT8,
+      'Int16': ydb.Type_PrimitiveTypeId.INT16,
+      'Int32': ydb.Type_PrimitiveTypeId.INT32,
+      'Int64': ydb.Type_PrimitiveTypeId.INT64,
+      'Uint8': ydb.Type_PrimitiveTypeId.UINT8,
+      'Uint16': ydb.Type_PrimitiveTypeId.UINT16,
+      'Uint32': ydb.Type_PrimitiveTypeId.UINT32,
+      'Uint64': ydb.Type_PrimitiveTypeId.UINT64,
+      'Float': ydb.Type_PrimitiveTypeId.FLOAT,
+      'Double': ydb.Type_PrimitiveTypeId.DOUBLE,
+      'String': ydb.Type_PrimitiveTypeId.STRING,
+      'Utf8': ydb.Type_PrimitiveTypeId.UTF8,
+      'Yson': ydb.Type_PrimitiveTypeId.YSON,
+      'Json': ydb.Type_PrimitiveTypeId.JSON,
+      'JsonDocument': ydb.Type_PrimitiveTypeId.JSON_DOCUMENT,
+      'Date': ydb.Type_PrimitiveTypeId.DATE,
+      'Datetime': ydb.Type_PrimitiveTypeId.DATETIME,
+      'Timestamp': ydb.Type_PrimitiveTypeId.TIMESTAMP,
+      'Interval': ydb.Type_PrimitiveTypeId.INTERVAL,
+      'Uuid': ydb.Type_PrimitiveTypeId.UUID,
+      'DyNumber': ydb.Type_PrimitiveTypeId.DYNUMBER,
+    };
+
+    final ydb.Type_PrimitiveTypeId? typeId = typeMap[typeName];
+    if (typeId != null) {
+      return ydb.Type()..typeId = typeId;
+    }
+
+    // Default to UTF8 for unknown types
+    _logger.warning('Unknown type name "$typeName", defaulting to UTF8');
+    return ydb.Type()..typeId = ydb.Type_PrimitiveTypeId.UTF8;
   }
 
   /// Convert our parameter format to YDB protobuf format using TypeConverter.
