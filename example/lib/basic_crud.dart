@@ -12,7 +12,7 @@ void main() async {
   // Configure YDB connection
   final DriverConfig config = DriverConfig(
     endpoint: 'grpcs://ydb.serverless.yandexcloud.net:2135',
-    database: '/ru-central1/b1gia87mbaomfr7aac2a/etnudu2n9ri35e0kgp4a',
+    database: '/ru-central1/b1...',
     credentials:
         YdbCredentials.anonymous(), // Replace with appropriate credentials
   );
