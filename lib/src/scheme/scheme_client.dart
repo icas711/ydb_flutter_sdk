@@ -1,5 +1,6 @@
 import '../transport/i_ydb_transport.dart';
 import 'alter_table_settings.dart';
+import 'directory_entry.dart';
 import 'table_description.dart';
 
 /// Client for performing DDL (Data Definition Language) operations on YDB.
@@ -164,6 +165,77 @@ class SchemeClient {
     );
 
     return TableDescription.fromJson(result);
+  }
+
+  /// Lists the contents of a directory in the YDB schema.
+  ///
+  /// [path] is the directory path to list. Use '' or '/' to list
+  /// the database root directory.
+  ///
+  /// Returns a list of [DirectoryEntry] objects describing the children
+  /// (tables, subdirectories, etc.) at the given path.
+  ///
+  /// Example:
+  /// ```dart
+  /// final entries = await client.listDirectory('');
+  /// for (final entry in entries) {
+  ///   print('${entry.name} — ${entry.type}');
+  /// }
+  /// ```
+  Future<List<DirectoryEntry>> listDirectory([String path = '']) async {
+    final String fullPath = _getFullPath(path);
+
+    final List<dynamic> result = await _transport.send<List<dynamic>>(
+      endpoint: '/scheme/v1/list_directory',
+      body: <String, String>{'path': fullPath},
+      decoder: (Object? response) => response as List<dynamic>,
+    );
+
+    return result
+        .map((dynamic e) => _parseDirectoryEntry(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// Converts a raw JSON map from the transport to a [DirectoryEntry].
+  static DirectoryEntry _parseDirectoryEntry(Map<String, dynamic> json) {
+    return DirectoryEntry(
+      name: json['name'] as String? ?? '',
+      owner: json['owner'] as String? ?? '',
+      type: _parseEntryType(json['type'] as String? ?? ''),
+      sizeBytes: json['size_bytes'] as int? ?? 0,
+    );
+  }
+
+  /// Converts an entry type string to [DirectoryEntryType].
+  static DirectoryEntryType _parseEntryType(String typeStr) {
+    switch (typeStr) {
+      case 'DIRECTORY':
+        return DirectoryEntryType.directory;
+      case 'TABLE':
+        return DirectoryEntryType.table;
+      case 'PERS_QUEUE_GROUP':
+        return DirectoryEntryType.persQueueGroup;
+      case 'DATABASE':
+        return DirectoryEntryType.database;
+      case 'RTMR_VOLUME':
+        return DirectoryEntryType.rtmrVolume;
+      case 'BLOCK_STORE_VOLUME':
+        return DirectoryEntryType.blockStoreVolume;
+      case 'COORDINATION_NODE':
+        return DirectoryEntryType.coordinationNode;
+      case 'COLUMN_STORE':
+        return DirectoryEntryType.columnStore;
+      case 'COLUMN_TABLE':
+        return DirectoryEntryType.columnTable;
+      case 'SEQUENCE':
+        return DirectoryEntryType.sequence;
+      case 'REPLICATION':
+        return DirectoryEntryType.replication;
+      case 'TOPIC':
+        return DirectoryEntryType.topic;
+      default:
+        return DirectoryEntryType.unspecified;
+    }
   }
 
   /// Converts a relative path to a full database path.

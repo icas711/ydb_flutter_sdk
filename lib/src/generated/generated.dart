@@ -25,6 +25,9 @@ export 'ydb_query.pb.dart'
         RollbackTransactionRequest,
         RollbackTransactionResponse;
 export 'ydb_query_v1.pbgrpc.dart';
+export 'ydb_scheme.pb.dart';
+export 'ydb_scheme.pbenum.dart';
+export 'ydb_scheme_v1.pbgrpc.dart';
 export 'ydb_status_codes.pb.dart';
 export 'ydb_table.pb.dart';
 export 'ydb_table_v1.pbgrpc.dart';
