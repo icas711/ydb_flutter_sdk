@@ -1,3 +1,13 @@
+## 0.2.2 (2026-02-11)
+
+- **Scheme Service gRPC** — written `SchemeServiceClient` stubs (`ListDirectory`, `MakeDirectory`, `RemoveDirectory`, `DescribePath`)
+- **`listDirectory`** — new method in `SchemeClient`, returns `List<DirectoryEntry>`
+- **`DirectoryEntry` model** — typed representation of schema objects (TABLE, DIRECTORY, COLUMN_TABLE, etc.)
+- **Example app redesign** — two-page architecture:
+  - Page 1: list all tables with create/delete
+  - Page 2: table data viewer with full CRUD (add, edit, delete rows)
+- Update LICENSE
+
 ## 0.2.1 (2026-02-09)
 
 - update readme.md
